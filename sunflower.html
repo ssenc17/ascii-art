@@ -1,0 +1,1253 @@
+<!-- 
+  inspired by @arimecoa's lily bouquet:
+  https://github.com/arimecoa/GIVEAWAY-ASCII
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>the sunflower is mine, in a way - vvg</title>
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+
+    background: linear-gradient(
+      180deg,
+      #0048A4 0%,
+      #72B6D0 100%
+    );
+  }
+
+  body {
+    display: grid;
+    place-items: center;
+  }
+
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    object-fit: contain;
+    background: transparent;
+  }
+</style>
+</head>
+
+<body>
+
+<canvas id="view" aria-label="animated sunflower bouquet"></canvas>
+
+<script>
+"use strict";
+
+const FONT_SIZE = 10, FPS = 30;
+
+const FONT = `${FONT_SIZE}px Menlo, Consolas, "DejaVu Sans Mono", "Courier New", monospace`;
+
+const probe = document.createElement("canvas").getContext("2d");
+
+probe.font = FONT;
+
+const CW = Math.max(1, Math.round(probe.measureText("M").width));
+const CH = Math.round(FONT_SIZE * 1.15);
+
+const ROWS = 160;
+const COLS = 240;
+const N = COLS * ROWS;
+
+const WAVE_PERIOD = 14, BREATH = 7, BREATH_DEPTH = 0.18;
+
+const settings = { wind: 3, size: 1.8, glow: 5 };
+
+const BUCKETS = [
+  " ",
+  ".'`",
+  ":;,-~",
+  "!/\\\\|()[]{}<>?+=",
+  "tfjrxnuvczil",
+  "XYUJCLQ0OZmwqpdbkhao",
+  "#MW&8%B",
+  "@$"
+];
+
+const LEVELS = [0.06, 0.15, 0.30, 0.45, 0.60, 0.75, 0.90];
+
+const BUD = [0.55, 0.74, 0.36];
+
+const STEM = [0.28, 0.56, 0.26];
+const ANTHER = [0.95, 0.42, 0.10];
+
+const PALETTES = {
+  sunflower: {
+    deep: [0.72, 0.28, 0.015],
+    mid: [1.00, 0.68, 0.025],
+    tip: [1.00, 0.94, 0.20],
+    sheen: [1.00, 1.00, 0.58],
+    spots: 0,
+    anther: [0.30, 0.12, 0.035]
+  }
+};
+
+const FLOWERS_BASE = [
+  [[-25, 34], 15, [-0.5, -0.55, 0.68], "sunflower", 5.4, 0.78],
+  [[24, 30], 15, [0.5, -0.6, 0.62], "sunflower", 5.8, 0.78],
+  [[0, 18], 13, [0.08, -0.85, 0.5], "sunflower", 6.2, 0.78],
+  [[-32, 64], 18, [-0.72, -0.2, 0.66], "sunflower", 4.8, 0.9],
+  [[32, 60], 18, [0.68, -0.25, 0.68], "sunflower", 5.1, 0.9],
+  [[-3, 46], 19, [-0.12, -0.42, 0.9], "sunflower", 4.5, 0.9],
+  [[-36, 112], 16, [-0.82, 0.1, 0.55], "sunflower", 5.2, 1.0],
+  [[37, 114], 16, [0.82, 0.12, 0.55], "sunflower", 5.5, 1.0],
+  [[-16, 86], 22, [-0.3, -0.18, 0.93], "sunflower", 3.9, 1.0],
+  [[18, 88], 21, [0.3, -0.14, 0.94], "sunflower", 4.2, 1.0],
+  [[1, 114], 20, [0.02, -0.28, 0.96], "sunflower", 4.6, 1.0]
+];
+
+const BUDS_BASE = [
+  [[-12, 10], 9, [-0.3, -0.95, 0.1], 0.0, "sunflower"],
+  [[13, 7], 9, [0.35, -0.93, 0.1], 0.9, "sunflower"],
+  [[39, 40], 8, [0.8, -0.55, 0.2], 0.0, "sunflower"],
+  [[-41, 42], 8, [-0.8, -0.5, 0.2], 0.7, "sunflower"],
+  [[24, 68], 7, [0.6, -0.7, 0.3], 0.0, "sunflower"]
+];
+
+const TAU = Math.PI * 2;
+const rad = (d) => d * Math.PI / 180;
+
+const clamp = (x, lo = 0, hi = 1) =>
+  (x < lo ? lo : x > hi ? hi : x);
+
+function smoothstep(a, b, x) {
+  const t = clamp((x - a) / (b - a));
+  return t * t * (3 - 2 * t);
+}
+
+const wave = (t, k, ph = 0) =>
+  Math.sin(TAU * k * t / WAVE_PERIOD + ph);
+
+function hash3(a, b, c) {
+  let h = (
+    Math.imul(a, 73856093) ^
+    Math.imul(b, 19349663) ^
+    Math.imul(c, 83492791)
+  ) >>> 0;
+
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+const add = (a, b) =>
+  [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+
+const sub = (a, b) =>
+  [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+
+const mul = (a, s) =>
+  [a[0] * s, a[1] * s, a[2] * s];
+
+const dot = (a, b) =>
+  a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+const cross = (a, b) => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0]
+];
+
+const norm = (v) =>
+  mul(v, 1 / (Math.hypot(v[0], v[1], v[2]) + 1e-9));
+
+const LIGHT = norm([-0.5, -0.6, 0.62]);
+
+const Xc = new Float32Array(COLS);
+const Yr = new Float32Array(ROWS);
+
+for (let c = 0; c < COLS; c++) {
+  Xc[c] = (c + 0.5 - COLS / 2) * 0.5;
+}
+
+for (let r = 0; r < ROWS; r++) {
+  Yr[r] = r + 0.5;
+}
+
+const lum = new Float32Array(N);
+const rgb = new Float32Array(N * 3);
+const rowShift = new Float32Array(ROWS);
+
+const bgLum = new Float32Array(N);
+const bgRgb = new Float32Array(N * 3);
+
+function set(i, l, cr, cg, cb) {
+  lum[i] = l;
+
+  const j = i * 3;
+
+  rgb[j] = cr;
+  rgb[j + 1] = cg;
+  rgb[j + 2] = cb;
+}
+
+const SEG = new Float64Array(16 * 9);
+
+function brush(pts, hws, av, fn) {
+  const n = pts.length;
+  const ns = n - 1;
+
+  if (n < 2) return;
+
+  let xmin = 1e9;
+  let xmax = -1e9;
+  let ymin = 1e9;
+  let ymax = -1e9;
+  let maxw = 0;
+
+  for (let k = 0; k < n; k++) {
+    const x = pts[k][0];
+    const y = pts[k][1];
+
+    if (x < xmin) xmin = x;
+    if (x > xmax) xmax = x;
+    if (y < ymin) ymin = y;
+    if (y > ymax) ymax = y;
+
+    if (hws[k] > maxw) maxw = hws[k];
+  }
+
+  for (let s = 0; s < ns; s++) {
+    const o = s * 9;
+
+    const ax = pts[s][0];
+    const ay = pts[s][1];
+
+    const dx = pts[s + 1][0] - ax;
+    const dy = pts[s + 1][1] - ay;
+
+    SEG[o] = ax;
+    SEG[o + 1] = ay;
+    SEG[o + 2] = dx;
+    SEG[o + 3] = dy;
+    SEG[o + 4] = 1 / (dx * dx + dy * dy + 1e-9);
+
+    SEG[o + 5] = hws[s];
+    SEG[o + 6] = hws[s + 1] - hws[s];
+    SEG[o + 7] = av[s];
+    SEG[o + 8] = av[s + 1] - av[s];
+  }
+
+  const pad = maxw + 1;
+
+  const r0 = Math.max(0, Math.floor(ymin - pad));
+  const r1 = Math.min(ROWS, Math.ceil(ymax + pad));
+
+  for (let r = r0; r < r1; r++) {
+    const py = Yr[r];
+    const sh = rowShift[r];
+
+    let rx0 = 1e9;
+    let rx1 = -1e9;
+
+    for (let s = 0, o = 0; s < ns; s++, o += 9) {
+      const pw = Math.max(
+        SEG[o + 5],
+        SEG[o + 5] + SEG[o + 6]
+      ) + 1;
+
+      const ya = SEG[o + 1];
+      const yb = ya + SEG[o + 3];
+
+      if (
+        py < Math.min(ya, yb) - pw ||
+        py > Math.max(ya, yb) + pw
+      ) continue;
+
+      const xa = SEG[o];
+      const xb = xa + SEG[o + 2];
+
+      rx0 = Math.min(rx0, Math.min(xa, xb) - pw);
+      rx1 = Math.max(rx1, Math.max(xa, xb) + pw);
+    }
+
+    if (rx0 > rx1) continue;
+
+    const c0 = Math.max(
+      0,
+      Math.floor((rx0 + sh) * 2 + COLS / 2)
+    );
+
+    const c1 = Math.min(
+      COLS,
+      Math.ceil((rx1 + sh) * 2 + COLS / 2)
+    );
+
+    for (let c = c0; c < c1; c++) {
+      const px = Xc[c] - sh;
+
+      let best = 1;
+      let bestS = -1;
+      let bestU = 0;
+
+      for (let s = 0, o = 0; s < ns; s++, o += 9) {
+        const qx = px - SEG[o];
+        const qy = py - SEG[o + 1];
+
+        const dx = SEG[o + 2];
+        const dy = SEG[o + 3];
+
+        let u = (qx * dx + qy * dy) * SEG[o + 4];
+
+        u = u < 0 ? 0 : u > 1 ? 1 : u;
+
+        const ex = qx - dx * u;
+        const ey = qy - dy * u;
+
+        let hw = SEG[o + 5] + SEG[o + 6] * u;
+
+        if (hw < 1e-3) hw = 1e-3;
+
+        const q2 = (ex * ex + ey * ey) / (hw * hw);
+
+        if (q2 < best) {
+          best = q2;
+          bestS = s;
+          bestU = u;
+        }
+      }
+
+      if (bestS < 0) continue;
+
+      const o = bestS * 9;
+
+      const cr =
+        SEG[o + 2] * (py - SEG[o + 1]) -
+        SEG[o + 3] * (px - SEG[o]);
+
+      const side = cr > 0 ? 1 : cr < 0 ? -1 : 0;
+
+      fn(
+        r * COLS + c,
+        SEG[o + 7] + SEG[o + 8] * bestU,
+        Math.sqrt(best) * side,
+        r,
+        c
+      );
+    }
+  }
+}
+
+const lin = (n) =>
+  Array.from({ length: n }, (_, k) => k / (n - 1));
+
+const lerp3 = (a, b, k) => {
+  k = clamp(k);
+
+  return [
+    a[0] + (b[0] - a[0]) * k,
+    a[1] + (b[1] - a[1]) * k,
+    a[2] + (b[2] - a[2]) * k
+  ];
+};
+
+function tube(pts, w0, w1, col) {
+  const n = pts.length;
+
+  if (n < 2) return;
+
+  const hws = lin(n).map(
+    (k) => w0 + (w1 - w0) * k
+  );
+
+  const dark = mul(col, 0.6);
+  const lite = mul(col, 1.25);
+
+  brush(pts, hws, lin(n), (i, a, q) => {
+    const k = clamp(0.5 - 0.5 * q);
+
+    set(
+      i,
+      0.42 + 0.35 * (1 - Math.abs(q)) - 0.18 * q,
+      dark[0] + (lite[0] - dark[0]) * k,
+      dark[1] + (lite[1] - dark[1]) * k,
+      dark[2] + (lite[2] - dark[2]) * k
+    );
+  });
+}
+
+function curve(p0, p1, bulge, grow, n = 10) {
+  const dx = p1[0] - p0[0];
+  const dy = p1[1] - p0[1];
+
+  const L = Math.hypot(dx, dy) + 1e-9;
+
+  const nx = -dy / L;
+  const ny = dx / L;
+
+  const out = [];
+
+  for (let k = 0; k < n; k++) {
+    const s = (k / (n - 1)) * grow;
+    const b = bulge * Math.sin(Math.PI * s);
+
+    out.push([
+      p0[0] + dx * s + nx * b,
+      p0[1] + dy * s + ny * b
+    ]);
+  }
+
+  return out;
+}
+
+const LEAF_D = [0.025, 0.30, 0.055];
+const LEAF_L = [0.16, 0.98, 0.20];
+const UNDER = [0.24, 0.78, 0.34];
+const OLD_TIP = [0.68, 0.78, 0.20];
+
+function leaf(L, t, unfurl) {
+  if (unfurl <= 0.01) return;
+
+  const n = 12;
+
+  const len = L.len * (0.3 + 0.7 * unfurl);
+  const wid = L.wid * (0.4 + 0.6 * unfurl);
+
+  const ang0 = L.stemAng +
+    (L.ang - L.stemAng) * unfurl;
+
+  const sway = rad(4) * wave(t, 3, L.seed);
+
+  const pts = [];
+  const hws = [];
+
+  let x = L.x;
+  let y = L.y;
+
+  for (let k = 0; k < n; k++) {
+    const a = k / (n - 1);
+
+    pts.push([x, y]);
+
+    const tw = Math.cos(L.twist * a + L.phase);
+
+    hws.push(
+      Math.max(
+        0.06,
+        wid *
+        Math.pow(Math.sin(Math.PI * Math.pow(a, 0.5)), 0.85) *
+        (0.2 + 0.8 * Math.abs(tw))
+      )
+    );
+
+    const bend =
+      L.droop * Math.pow(a, 1.6) +
+      L.kink * smoothstep(L.kinkAt - 0.05, L.kinkAt + 0.05, a);
+
+    const ang = ang0 + sway * a + L.dir * bend * unfurl;
+
+    x += Math.cos(ang) * len / (n - 1);
+    y += Math.sin(ang) * len / (n - 1);
+  }
+
+  brush(pts, hws, lin(n), (i, a, q) => {
+    const aq = Math.abs(q);
+
+    const back =
+      Math.cos(L.twist * a + L.phase) < 0;
+
+    const lit = (q > 0) !== back ? 1 : 0;
+
+    let l =
+      (0.42 + 0.28 * lit + 0.22 * Math.pow(1 - aq, 0.7)) *
+      (0.88 + 0.12 * Math.cos(q * Math.PI * 6));
+
+    if (aq < 0.08) {
+      l = back ? 0.78 : 0.34;
+    } else if (aq > 0.88) {
+      l += 0.12;
+    }
+
+    l *= 0.8 + 0.2 * clamp(a * 6);
+
+    let c = back
+      ? lerp3(mul(UNDER, 0.8), UNDER, 0.4 + 0.6 * (1 - aq))
+      : lerp3(LEAF_D, LEAF_L, 0.3 + 0.45 * lit + 0.25 * (1 - aq));
+
+    if (L.old) {
+      c = lerp3(c, OLD_TIP, (a - 0.8) * 4);
+    }
+
+    set(i, clamp(l), c[0], c[1], c[2]);
+  });
+}
+
+const BUD09 = mul(BUD, 0.9);
+
+function lily(center, axis, size, openness, ripe, t, seed, pal, bright) {
+  if (size <= 0.3) return;
+
+  const a3 = norm(axis);
+
+  const ref = Math.abs(a3[2]) < 0.9
+    ? [0, 0, 1]
+    : [1, 0, 0];
+
+  const u3 = norm(cross(a3, ref));
+  const v3 = cross(a3, u3);
+
+  const c3 = [center[0], center[1], 0];
+
+  const spin = rad(9) + rad(2) * wave(t, 3, seed);
+
+  const petals = [];
+
+  const PETAL_COUNT = 20;
+
+  for (let k = 0; k < PETAL_COUNT; k++) {
+
+    const phi = spin + k * TAU / PETAL_COUNT;
+
+    const radial = add(
+      mul(u3, Math.cos(phi)),
+      mul(v3, Math.sin(phi))
+    );
+
+    const tangent = cross(a3, radial);
+
+    const layer = k % 2;
+
+    const angleOffset = layer * Math.PI / PETAL_COUNT;
+
+    const direction = norm(
+      add(
+        mul(radial, Math.cos(angleOffset)),
+        mul(tangent, Math.sin(angleOffset))
+      )
+    );
+
+    const L = size * (0.92 + 0.08 * Math.sin(k * 2.4));
+
+    const W = size * (layer ? 0.105 : 0.115);
+
+    const n = 13;
+
+    const pts3 = [];
+    const hws = [];
+
+    const growth = 0.12 + 0.88 * openness;
+
+    let p = add(
+      c3,
+      mul(direction, size * 0.12)
+    );
+
+    for (let i = 0; i < n; i++) {
+
+      const a = i / (n - 1);
+
+      pts3.push(p);
+
+      const shape = Math.pow(
+        Math.sin(Math.PI * Math.pow(a, 0.82)),
+        0.72
+      );
+
+      hws.push(W * shape * growth);
+
+      const bend = rad(8) * Math.sin(Math.PI * a);
+
+      const outward = norm(
+        add(
+          mul(direction, Math.cos(bend)),
+          mul(a3, Math.sin(bend))
+        )
+      );
+
+      p = add(
+        p,
+        mul(outward, L * growth / (n - 1))
+      );
+    }
+
+    const normal = norm(
+      cross(
+        norm(sub(pts3[4], pts3[0])),
+        tangent
+      )
+    );
+
+    const facing = normal[2];
+
+    const tproj = Math.hypot(
+      tangent[0],
+      tangent[1]
+    );
+
+    petals.push({
+      depth: pts3.reduce((s, q) => s + q[2], 0) / n,
+      pts: pts3.map(q => [q[0], q[1]]),
+      hws: hws.map(
+        h => Math.max(h * Math.max(tproj, 0.3), 0.08)
+      ),
+      normal,
+      facing,
+      pseed: seed * 10 + k
+    });
+  }
+
+  petals.sort((a, b) => a.depth - b.depth);
+
+  const dim = 0.85 + 0.15 * bright;
+  const av = lin(13);
+
+  for (const pt of petals) {
+
+    const sg = pt.facing < 0 ? -1 : 1;
+
+    const light =
+      0.4 +
+      0.6 * Math.max(
+        0,
+        dot(mul(pt.normal, sg), LIGHT)
+      );
+
+    const back = pt.facing < 0;
+
+    brush(
+      pt.pts,
+      pt.hws,
+      av,
+      (i, a, q, r, c) => {
+
+        const aq = Math.abs(q);
+
+        let l =
+          light *
+          (0.68 + 0.32 * Math.pow(1 - aq, 0.6));
+
+        if (back) l *= 0.78;
+
+        l *= 0.85 + 0.2 * clamp(a * 2);
+
+        let col = lerp3(
+          pal.deep,
+          pal.mid,
+          smoothstep(0.05, 0.48, a)
+        );
+
+        col = lerp3(
+          col,
+          pal.tip,
+          smoothstep(0.55, 1.0, a)
+        );
+
+        col = lerp3(
+          col,
+          pal.sheen,
+          Math.max(0, light - 0.75) *
+          1.5 *
+          (1 - aq)
+        );
+
+        col = lerp3(
+          [0.48, 0.19, 0.015],
+          col,
+          ripe * 0.85 + 0.15
+        );
+
+        set(
+          i,
+          clamp(l) * bright,
+          col[0] * dim,
+          col[1] * dim,
+          col[2] * dim
+        );
+      }
+    );
+  }
+
+  const show = smoothstep(0.12, 0.65, openness);
+
+  if (show <= 0) return;
+
+  const diskRadius = size * 0.34 * show;
+
+  const brown = [0.25, 0.085, 0.025];
+  const brownLight = [0.48, 0.23, 0.055];
+  const brownDark = [0.12, 0.035, 0.012];
+
+  for (let k = 0; k < 64; k++) {
+
+    const phi = k * TAU / 64;
+
+    const radial = add(
+      mul(u3, Math.cos(phi)),
+      mul(v3, Math.sin(phi))
+    );
+
+    const edge = add(
+      c3,
+      mul(radial, diskRadius)
+    );
+
+    const variation =
+      0.5 + 0.5 * Math.sin(k * 2.73 + seed);
+
+    const col = lerp3(
+      brown,
+      brownLight,
+      variation * 0.65
+    );
+
+    brush(
+      [
+        [center[0], center[1]],
+        [edge[0], edge[1]]
+      ],
+      [
+        diskRadius * 0.18,
+        diskRadius * 0.18
+      ],
+      [0, 1],
+      (i, a) => {
+
+        const shade = lerp3(
+          brownDark,
+          col,
+          0.45 + 0.55 * a
+        );
+
+        set(
+          i,
+          0.72 * bright,
+          shade[0],
+          shade[1],
+          shade[2]
+        );
+      }
+    );
+  }
+
+  const SEEDS = 180;
+
+  for (let k = 0; k < SEEDS; k++) {
+
+    const h1 = rnd(seed * 1000 + k * 3);
+    const h2 = rnd(seed * 1000 + k * 3 + 1);
+
+    const radius =
+      diskRadius * 0.92 * Math.sqrt(h1);
+
+    const angle = h2 * TAU;
+
+    const dx = Math.cos(angle) * radius;
+    const dy = Math.sin(angle) * radius;
+
+    const x =
+      center[0] +
+      u3[0] * dx +
+      v3[0] * dy;
+
+    const y =
+      center[1] +
+      u3[1] * dx +
+      v3[1] * dy;
+
+    const col = k % 3 === 0
+      ? [0.65, 0.36, 0.09]
+      : k % 3 === 1
+        ? [0.38, 0.16, 0.035]
+        : [0.19, 0.065, 0.018];
+
+    const r = 0.25 + h1 * 0.35;
+
+    brush(
+      [
+        [x - r * 0.5, y],
+        [x + r * 0.5, y + 0.15]
+      ],
+      [r, r],
+      [0, 1],
+      (i) => {
+        set(
+          i,
+          0.85 * bright,
+          col[0],
+          col[1],
+          col[2]
+        );
+      }
+    );
+  }
+
+  for (let k = 0; k < 32; k++) {
+
+    const phi = k * TAU / 32;
+
+    const x =
+      center[0] +
+      (u3[0] * Math.cos(phi) +
+       v3[0] * Math.sin(phi)) *
+      diskRadius * 1.04;
+
+    const y =
+      center[1] +
+      (u3[1] * Math.cos(phi) +
+       v3[1] * Math.sin(phi)) *
+      diskRadius * 1.04;
+
+    brush(
+      [
+        [x - 0.3, y],
+        [x + 0.3, y]
+      ],
+      [0.45, 0.45],
+      [0, 1],
+      (i) => set(
+        i,
+        0.85 * bright,
+        1.0,
+        0.65,
+        0.08
+      )
+    );
+  }
+}
+
+const rnd = (k) => hash3(k, 911, 37) / 4294967296;
+
+const STEM_DUR = 1.05;
+
+const easeOut = (x) => 1 - Math.pow(1 - clamp(x), 3);
+
+let FLOWERS = [];
+let BUDS = [];
+
+function pathAt(path, frac) {
+  const f = frac * (path.length - 1);
+
+  const k = Math.min(path.length - 2, Math.floor(f));
+  const u = f - k;
+
+  const a = path[k];
+  const b = path[k + 1];
+
+  return {
+    x: a[0] + (b[0] - a[0]) * u,
+    y: a[1] + (b[1] - a[1]) * u,
+    ang: Math.atan2(b[1] - a[1], b[0] - a[0])
+  };
+}
+
+function buildLayout() {
+  const fl = FLOWERS_BASE.map(
+    ([pos, size, axis, col, tOpen, bright], i) => ({
+      pos,
+      size,
+      axis,
+      col,
+      bright,
+      baseX: pos[0] * 0.12,
+      bulge: 2.5 * Math.sign(pos[0] || 1) * (i % 2 ? 1 : -0.6),
+      start: 0.05 + 0.11 * i,
+      tOpen: 1.7 + (tOpen - 3.9) * 0.55
+    })
+  );
+
+  const bd = BUDS_BASE.map(
+    ([pos, size, axis, ripe, col], i) => ({
+      pos,
+      size,
+      axis,
+      ripe,
+      col,
+      baseX: pos[0] * 0.12,
+      bulge: 2.5 * Math.sign(pos[0] || 1) * (i % 2 ? -0.6 : 1),
+      start: 0.18 + 0.16 * i
+    })
+  );
+
+  for (const o of [...fl, ...bd]) {
+    o.end = o.start + STEM_DUR;
+    o.path = curve([o.baseX, 158], o.pos, o.bulge, 1, 14);
+  }
+
+  fl.forEach((f, i) => {
+    f.tOpen = Math.max(f.tOpen, f.end + 0.6);
+
+    const front = f.bright > 0.8;
+
+    const fv0 = clamp(
+      (158 - (ROWS - 4)) / (158 - f.pos[1]),
+      0.04,
+      0.6
+    );
+
+    const fv1 = Math.min(0.78, fv0 + 0.62);
+
+    const fracs = front
+      ? [0, 0.25, 0.5, 0.75, 1].map(
+          (u) => fv0 + (fv1 - fv0) * u
+        )
+      : [0.55, 0.72];
+
+    f.leaves = fracs.map((fr, j) => {
+      const sd = i * 31 + j * 7 + 3;
+
+      const frac = clamp(
+        fr + (rnd(sd) - 0.5) * 0.05,
+        0.04,
+        0.82
+      );
+
+      const p = pathAt(f.path, frac);
+      const side = (i + j) % 2 ? 1 : -1;
+
+      const ang = p.ang + side * rad(28 + rnd(sd + 1) * 30);
+
+      return {
+        x: p.x,
+        y: p.y,
+        stemAng: p.ang,
+        ang,
+        dir: Math.cos(ang) >= 0 ? 1 : -1,
+        seed: sd,
+
+        len: (27 - j * 3.5) *
+          (0.8 + rnd(sd + 2) * 0.4) *
+          (front ? 1 : 0.75),
+
+        wid: 3.2 + rnd(sd + 3) * 1.2,
+
+        droop: rad(25 + rnd(sd + 4) * 45) *
+          (1 - frac * 0.6),
+
+        kink: rnd(sd + 5) < 0.45
+          ? rad(40 + rnd(sd + 6) * 45)
+          : 0,
+
+        kinkAt: 0.4 + rnd(sd + 7) * 0.3,
+        twist: 1 + rnd(sd + 8) * 2.6,
+        phase: rnd(sd + 9) * TAU,
+        old: rnd(sd + 10) < 0.25,
+
+        tAt: f.start + STEM_DUR * (1 - Math.cbrt(1 - frac))
+      };
+    });
+  });
+
+  FLOWERS = fl;
+  BUDS = bd;
+}
+
+buildLayout();
+
+function scene(t) {
+  for (let r = 0; r < ROWS; r++) {
+    const h = clamp((ROWS + 10 - Yr[r]) / 140);
+    const w = t - 0.4 * h;
+
+    rowShift[r] =
+      settings.wind *
+      (
+        0.6 * wave(w, 2) +
+        0.3 * wave(w, 3, 1) +
+        0.1 * wave(w, 5, 2)
+      ) *
+      Math.pow(h, 1.5);
+  }
+
+  lum.set(bgLum);
+  rgb.set(bgRgb);
+
+  const growOf = (o) =>
+    easeOut((t - o.start) / STEM_DUR);
+
+  for (const f of FLOWERS) {
+    for (const L of f.leaves) {
+      leaf(
+        L,
+        t,
+        smoothstep(L.tAt, L.tAt + 0.55, t)
+      );
+    }
+  }
+
+  for (const b of BUDS) {
+    tube(
+      curve([b.baseX, 158], b.pos, b.bulge, growOf(b), 14),
+      0.7,
+      0.45,
+      STEM
+    );
+  }
+
+  for (const f of FLOWERS) {
+    tube(
+      curve([f.baseX, 158], f.pos, f.bulge, growOf(f), 14),
+      0.85,
+      0.5,
+      STEM
+    );
+  }
+
+  FLOWERS.forEach((f, i) => {
+    if (t < f.end) return;
+
+    const swell = smoothstep(f.end, f.end + 0.6, t);
+
+    const ripe = smoothstep(f.tOpen - 1.0, f.tOpen + 0.3, t);
+
+    const opening = smoothstep(f.tOpen, f.tOpen + 1.6, t);
+
+    const breathe =
+      BREATH_DEPTH *
+      (0.5 - 0.5 * Math.cos(
+        TAU * (t - f.tOpen - 3) / BREATH + i * 0.9
+      )) *
+      smoothstep(f.tOpen + 1.6, f.tOpen + 3, t);
+
+    const openness = opening * (1 - breathe);
+
+    const s =
+      f.size *
+      settings.size *
+      (0.35 + 0.65 * swell) *
+      (0.5 + 0.5 * Math.max(openness, ripe * 0.6));
+
+    lily(
+      f.pos,
+      f.axis,
+      s,
+      openness,
+      ripe,
+      t,
+      i * 7 + 3,
+      PALETTES[f.col],
+      f.bright
+    );
+  });
+
+  BUDS.forEach((b, i) => {
+    if (t < b.end) return;
+
+    const swell = smoothstep(b.end, b.end + 0.6, t);
+
+    lily(
+      b.pos,
+      b.axis,
+      b.size * (0.4 + 0.6 * swell),
+      0.04 + 0.03 * wave(t, 2, i),
+      b.ripe * swell,
+      t,
+      90 + i,
+      PALETTES[b.col],
+      0.9
+    );
+  });
+
+  const pv = 0.5 * smoothstep(3, 4.5, t);
+  const off = Math.floor(t * 4);
+
+  if (pv > 0) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const i = r * COLS + c;
+
+        if (
+          lum[i] < 0.1 &&
+          hash3(c, r + off, 77) % 1000 < 5
+        ) {
+          set(i, pv, 1, 0.8, 0.4);
+        }
+      }
+    }
+  }
+
+  const fade = smoothstep(0, 0.2, t);
+
+  if (fade < 1) {
+    for (let i = 0; i < N; i++) {
+      lum[i] *= fade;
+    }
+  }
+}
+
+const view = document.getElementById("view");
+const ctx = view.getContext("2d");
+
+const W = COLS * CW;
+const H = ROWS * CH;
+
+view.width = W;
+view.height = H;
+
+const CHARS = BUCKETS.join("");
+
+const START = [];
+const COUNT = BUCKETS.map((b) => b.length);
+
+BUCKETS.reduce((s, b, k) => {
+  START[k] = s;
+  return s + b.length;
+}, 0);
+
+const MASKS = [...CHARS].map((ch) => {
+  const g = document.createElement("canvas");
+
+  g.width = CW;
+  g.height = CH;
+
+  const gx = g.getContext("2d");
+
+  gx.font = FONT;
+  gx.textBaseline = "top";
+  gx.fillStyle = "#fff";
+  gx.fillText(ch, 0, 0);
+
+  const d = gx.getImageData(0, 0, CW, CH).data;
+  const m = new Uint8Array(CW * CH);
+
+  for (let k = 0; k < m.length; k++) {
+    m[k] = d[k * 4 + 3];
+  }
+
+  return m;
+});
+
+const ascii = document.createElement("canvas");
+
+ascii.width = W;
+ascii.height = H;
+
+const actx = ascii.getContext("2d");
+
+const img = actx.createImageData(W, H);
+const px = img.data;
+const px32 = new Uint32Array(px.buffer);
+
+const glowA = document.createElement("canvas");
+const glowB = document.createElement("canvas");
+const glowC = document.createElement("canvas");
+
+[[glowA, 2], [glowB, 4], [glowC, 8]].forEach(([g, s]) => {
+  g.width = Math.ceil(W / s);
+  g.height = Math.ceil(H / s);
+});
+
+function draw(frame, t) {
+  px32.fill(0);
+
+  const fidx = Math.floor(frame / 3);
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const i = r * COLS + c;
+      const L = lum[i];
+
+      let level = 0;
+
+      while (level < LEVELS.length && L >= LEVELS[level]) {
+        level++;
+      }
+
+      if (level === 0) continue;
+
+      const ch = START[level] + hash3(r, c, fidx) % COUNT[level];
+      const m = MASKS[ch];
+
+      const k = (0.45 + 0.75 * L) * 1.6;
+      const j = i * 3;
+
+      const R = rgb[j] * k;
+      const G = rgb[j + 1] * k;
+      const B = rgb[j + 2] * k;
+
+      let o0 = (r * CH) * W + c * CW;
+      let mi = 0;
+
+      for (let y = 0; y < CH; y++, o0 += W) {
+        for (let x = 0; x < CW; x++, mi++) {
+          const v = m[mi];
+
+          if (v) {
+            const pr = Math.min(255, 255 * R) | 0;
+            const pg = Math.min(255, 255 * G) | 0;
+            const pb = Math.min(255, 255 * B) | 0;
+
+            px32[o0 + x] =
+              (v << 24) |
+              (pb << 16) |
+              (pg << 8) |
+              pr;
+          }
+        }
+      }
+    }
+  }
+
+  actx.putImageData(img, 0, 0);
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.drawImage(ascii, 0, 0);
+
+  ctx.drawImage(ascii, 0, 0);
+
+  if (settings.glow > 0) {
+    let src = ascii;
+
+    for (const g of [glowA, glowB, glowC]) {
+      const gx = g.getContext("2d");
+
+      gx.imageSmoothingEnabled = true;
+      gx.clearRect(0, 0, g.width, g.height);
+
+      gx.drawImage(src, 0, 0, g.width, g.height);
+
+      src = g;
+    }
+
+    ctx.save();
+
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = Math.min(1, settings.glow);
+
+    ctx.imageSmoothingEnabled = true;
+
+    ctx.drawImage(glowC, 0, 0, W, H);
+
+    if (settings.glow > 1) {
+      ctx.globalAlpha = settings.glow - 1;
+      ctx.drawImage(glowC, 0, 0, W, H);
+    }
+
+    ctx.restore();
+  }
+}
+
+let t0 = performance.now();
+let lastDraw = -1e9;
+
+function tick(now) {
+  if (now - lastDraw >= 1000 / FPS - 2) {
+    lastDraw = now;
+
+    const t = (now - t0) / 1000;
+
+    scene(t);
+    draw(Math.floor(t * FPS), t);
+  }
+
+  requestAnimationFrame(tick);
+}
+
+requestAnimationFrame(tick);
+
+</script>
+</body>
+</html>
